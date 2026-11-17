@@ -1,141 +1,18 @@
-// Drawing only: the world's state and the current screen in, pixels out. The 1280x720 playfield
-// is scaled to fit the window and centred, the margin filled with the backdrop colour. Flat
-// rectangles and circles, canvas text for the HUD and the panels. Text that holds a number is
-// rebuilt only when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, LIVES, PALETTE } from './config.js';
-import { KIND_COIN } from './world.js';
-
-export const SCREEN_TITLE = 'title';
-export const SCREEN_PLAY = 'play';
-export const SCREEN_PAUSED = 'paused';
-export const SCREEN_OVER = 'over';
-
-/** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
-const PANEL = { width: 600, top: 134, line: 34, bottom: 70 };
-const LIFE_SIZE = 20;
-const LIFE_GAP = 8;
-
-function cachedLabel(prefix) {
-  let value = -1;
-  let text = '';
-  return function label(next) {
-    if (next !== value) {
-      value = next;
-      text = prefix + next;
-    }
-    return text;
-  };
-}
-
-export function createRenderer(canvas) {
-  const context = canvas.getContext('2d');
-  const view = { scale: 1, x: 0, y: 0 };
-  const scoreLabel = cachedLabel('Score ');
-  const levelLabel = cachedLabel('Level ');
-  const finalLabel = cachedLabel('Score ');
-  const bestLabel = cachedLabel('Best ');
-
-  function resize() {
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.round(window.innerWidth * ratio);
-    const height = Math.round(window.innerHeight * ratio);
-    canvas.width = width;
-    canvas.height = height;
-    view.scale = Math.min(width / FIELD.width, height / FIELD.height);
-    view.x = (width - FIELD.width * view.scale) / 2;
-    view.y = (height - FIELD.height * view.scale) / 2;
-  }
-
-  const fonts = new Map();
-  function text(value, x, y, size, color, align) {
-    if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
-    context.font = fonts.get(size);
-    context.fillStyle = color;
-    context.textAlign = align;
-    context.fillText(value, x, y);
-  }
-
-  function drawField(state) {
-    context.fillStyle = PALETTE.sky;
-    context.fillRect(0, 0, FIELD.width, FIELD.height);
-    context.fillStyle = PALETTE.ground;
-    context.fillRect(0, FIELD.groundY, FIELD.width, FIELD.height - FIELD.groundY);
-
-    const items = state.items;
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      if (item.kind === KIND_COIN) {
-        context.fillStyle = PALETTE.coin;
-        context.beginPath();
-        context.arc(item.x + item.width / 2, item.y + item.height / 2, item.width / 2, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillStyle = PALETTE.block;
-        context.fillRect(item.x, item.y, item.width, item.height);
-      }
-    }
-
-    const player = state.player;
-    // Blink while invulnerable after a hit: hidden on every other tenth of a second.
-    if (player.invulnerable === 0 || Math.floor(player.invulnerable * 10) % 2 === 1) {
-      context.fillStyle = PALETTE.player;
-      context.fillRect(player.x, player.y, player.width, player.height);
-    }
-  }
-
-  function drawHud(state) {
-    context.textBaseline = 'top';
-    text(scoreLabel(state.score), 24, 20, 28, PALETTE.text, 'left');
-    text(levelLabel(state.level), FIELD.width / 2, 20, 28, PALETTE.text, 'center');
-    const firstLife = FIELD.width - 24 - LIVES * (LIFE_SIZE + LIFE_GAP) + LIFE_GAP;
-    text('Lives', firstLife - 12, 20, 28, PALETTE.text, 'right');
-    for (let life = 0; life < LIVES; life += 1) {
-      context.fillStyle = life < state.lives ? PALETTE.player : PALETTE.ground;
-      context.fillRect(firstLife + life * (LIFE_SIZE + LIFE_GAP), 24, LIFE_SIZE, LIFE_SIZE);
-    }
-  }
-
-  function drawPanel(title, lines, prompt) {
-    const height = PANEL.top + lines.length * PANEL.line + PANEL.bottom;
-    const x = (FIELD.width - PANEL.width) / 2;
-    const y = (FIELD.height - height) / 2;
-    context.fillStyle = PALETTE.panel;
-    context.fillRect(x, y, PANEL.width, height);
-    context.textBaseline = 'alphabetic';
-    text(title, FIELD.width / 2, y + 78, 48, PALETTE.text, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + PANEL.top + index * PANEL.line, 22, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 40, 24, PALETTE.coin, 'center');
-  }
-
-  const TITLE_LINES = ['Dodge the red blocks. Catch the gold coins.', 'Move with ← → or A D.  Pause with P.', ''];
-  const PAUSED_LINES = ['The blocks will wait for you.'];
-  const OVER_LINES = ['', ''];
-
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
-  function draw(state, screen, best) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PALETTE.backdrop;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-    drawField(state);
-    if (screen === SCREEN_TITLE) {
-      TITLE_LINES[2] = bestLabel(best);
-      drawPanel('Block Dodger', TITLE_LINES, 'Press Space or click to start');
-      return;
-    }
-    drawHud(state);
-    if (screen === SCREEN_PAUSED) drawPanel('Paused', PAUSED_LINES, 'Press P to resume');
-    else if (screen === SCREEN_OVER) {
-      OVER_LINES[0] = finalLabel(state.score);
-      OVER_LINES[1] = bestLabel(best);
-      drawPanel('Game over', OVER_LINES, 'Press Space or click to play again');
-    }
-  }
-
-  resize();
-  window.addEventListener('resize', resize);
-  return { draw };
-}
+import { COLORS } from './config.js';
+import { drawHud } from './hud.js';
+import { drawMenu } from './menu.js';
+import { drawEffects } from './effects.js';
+export function createRenderer(canvas){const ctx=canvas.getContext('2d');function resize(){canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;ctx.setTransform(canvas.width/1280,0,0,canvas.height/720,0,0)}window.addEventListener('resize',resize);resize();return {draw(s,screen,dt=0){const g=ctx.createLinearGradient(0,0,0,500);g.addColorStop(0,'#55a9be');g.addColorStop(.55,'#f7b879');g.addColorStop(1,'#f7d59a');ctx.fillStyle=g;ctx.fillRect(0,0,1280,720);ctx.fillStyle='#fff1ca';ctx.beginPath();ctx.arc(1030,114,58,0,7);ctx.fill();ctx.globalAlpha=.18;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(1030,114,90,0,7);ctx.fill();ctx.globalAlpha=1;
+ctx.fillStyle=COLORS.ocean;ctx.fillRect(0,400,1280,320);ctx.fillStyle='#e8c38b';ctx.fillRect(0,398,1280,48);
+// Boulevard and repeating street blocks
+ctx.fillStyle='#41484b';ctx.fillRect(0,476,1280,168);ctx.fillStyle='#ffe4aa';for(let i=0;i<12;i++)ctx.fillRect(i*120+15,555,58,5);
+for(let i=0;i<18;i++){let x=(i*93-(s.player.x*.22)%93+1280)%1280;let h=80+(i*47%130);ctx.fillStyle=['#d99470','#e7c291','#bd806b','#8ab0a0'][i%4];ctx.fillRect(x,395-h,60,h);ctx.fillStyle='#f7d99d';for(let k=0;k<3;k++)for(let j=0;j<Math.floor(h/28);j++)ctx.fillRect(x+8+k*17,405-h+j*25,7,9);}
+// palms
+for(let i=0;i<10;i++){let x=(i*148-(s.player.x*.3)%148+1280)%1280,y=455;ctx.strokeStyle='#725137';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(x,y);ctx.quadraticCurveTo(x+18,y-54,x+8,y-100);ctx.stroke();ctx.strokeStyle='#28796b';ctx.lineWidth=6;for(let a=-2;a<=2;a++){ctx.beginPath();ctx.moveTo(x+8,y-100);ctx.quadraticCurveTo(x+a*22,y-120,x+a*34,y-103);ctx.stroke();}}
+// traffic
+for(const car of s.traffic){const x=(640+car.x-s.player.x*.2+1600)%1500-110;drawCar(ctx,x,car.z>0?510:480,car.color,car.z>0?1:.72)}
+for(const p of s.pedestrians){let x=(640+p.x-s.player.x*.22+1380)%1380-50;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(x,467,6,0,7);ctx.fill();ctx.fillRect(x-4,472,8,23)}
+for(const c of s.police.cars)drawCar(ctx,640+c.x-s.player.x*.08,493,'#eaf0e6',.95,true);
+if(s.player.inCar)drawCar(ctx,620,548,'#f16f59',1.2);else{ctx.fillStyle='#102434';ctx.beginPath();ctx.arc(640,512,12,0,7);ctx.fill();ctx.fillRect(631,522,18,36);}
+if(s.player.fire){ctx.fillStyle='#ffd46f';ctx.beginPath();ctx.arc(680,530,12,0,7);ctx.fill();}drawEffects(ctx,s.effects,dt);drawHud(ctx,s);drawMenu(ctx,screen);}}}
+function drawCar(ctx,x,y,color,scale=1,police=false){ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);ctx.fillStyle='#1b2930';ctx.beginPath();ctx.roundRect(-43,-19,86,35,10);ctx.fill();ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(-40,-22,80,29,8);ctx.fill();ctx.fillStyle='#a8d1d0';ctx.fillRect(-20,-20,35,13);ctx.fillStyle='#192831';ctx.fillRect(-31,4,15,8);ctx.fillRect(18,4,15,8);ctx.fillStyle='#ffe6aa';ctx.fillRect(35,-11,5,7);if(police){ctx.fillStyle='#e94b55';ctx.fillRect(-8,-27,10,5);ctx.fillStyle='#4b9eff';ctx.fillRect(3,-27,10,5)}ctx.restore();}
