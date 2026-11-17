@@ -1,3 +1,4 @@
+// Solara: Last Light static open-world entry; render game/src modules offline.
 // A working gta6-01 entry (Node 22, standard library only): the game is this directory's
 // game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
 // modules, no library and no network request), and the program hands it in. It copies game/ and
